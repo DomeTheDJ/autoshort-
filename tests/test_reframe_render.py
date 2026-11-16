@@ -39,5 +39,12 @@ def test_piece_command_is_memory_friendly(tmp_path):
     cmd = render.piece_command(tmp_path / "in.mov", info, p, True, False, tmp_path / "p.mkv", "veryfast")
     joined = " ".join(cmd)
     assert cmd.count("-i") == 1 and "-ss 10.000" in joined
-    assert "-threads 1" in joined and "rc-lookahead=5" in joined
+    assert "-threads 1" in joined and "-preset ultrafast" in joined
     assert "-frames:v 96" in joined  # 3,2 s × 30 fps, exakt auf Bildraster
+
+
+def test_killed_ffmpeg_gives_memory_hint(tmp_path):
+    import pytest
+    from app.errors import UserError
+    with pytest.raises(UserError, match="Arbeitsspeicher"):
+        render._run(["sh", "-c", "kill -9 $$"], tmp_path)

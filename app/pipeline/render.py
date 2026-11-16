@@ -7,6 +7,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from app.errors import UserError
 from app.pipeline.editing import Interval
 from app.pipeline.media import VideoInfo, run
 from app.pipeline.reframe import TARGET_H, TARGET_W, Focus, crop_box
@@ -57,10 +58,14 @@ def sfx_times(pieces: list[Piece]) -> list[float]:
 
 
 FPS = 30
+OUT_OF_MEMORY = ("Der Server hatte nicht genug Arbeitsspeicher für dieses Video. Tipp: Video in "
+                 "1080p und ohne HDR aufnehmen (iPhone: Einstellungen → Kamera → Video aufnehmen) "
+                 "oder einen größeren Render-Plan wählen.")
 # Wenig Threads und kurzer Lookahead = wenig Arbeitsspeicher (wichtig für 512-MB-Server).
 # Auf stärkeren Servern kann FFMPEG_THREADS erhöht werden.
 THREADS = os.environ.get("FFMPEG_THREADS", "1")
 X264_PARAMS = os.environ.get("X264_PARAMS", "rc-lookahead=5")
+PIECE_PRESET = os.environ.get("PIECE_PRESET", "ultrafast")
 
 
 def piece_command(src: Path, info: VideoInfo, p: Piece, fade_in: bool, fade_out: bool,
@@ -88,9 +93,10 @@ def piece_command(src: Path, info: VideoInfo, p: Piece, fade_in: bool, fade_out:
              f"atrim=0:{dur:.4f}{fades}[a]")
     return cmd + ["-filter_complex", graph, "-filter_complex_threads", "1",
                   "-map", "[v]", "-map", "[a]", "-frames:v", str(frames),
-                  "-c:v", "libx264", "-preset", preset, "-crf", "18", "-pix_fmt", "yuv420p",
-                  "-profile:v", "high", "-threads", THREADS, "-x264-params", X264_PARAMS,
-                  "-c:a", "pcm_s16le", str(out)]
+                  # Zwischenstück: „ultrafast“ braucht am wenigsten Speicher; die Qualität
+                  # bleibt durch die niedrige CRF erhalten, die Endkodierung kommt danach.
+                  "-c:v", "libx264", "-preset", PIECE_PRESET, "-crf", "16", "-pix_fmt", "yuv420p",
+                  "-threads", THREADS, "-c:a", "pcm_s16le", str(out)]
 
 
 def finish_command(joined: Path, total: float, times: list[float], out: Path, ass_name: str | None,
@@ -122,13 +128,10 @@ def finish_command(joined: Path, total: float, times: list[float], out: Path, as
     else:
         last = "[0:a]"
     f.append(f"{last}loudnorm=I=-14:TP=-1.5:LRA=11,aresample=48000[aout]")
-    if ass_name:
-        f.append(f"[0:v]ass={ass_name}[vout]")
-        video = ["-map", "[vout]", "-c:v", "libx264", "-preset", preset, "-crf", "21",
-                 "-pix_fmt", "yuv420p", "-profile:v", "high", "-threads", THREADS,
-                 "-x264-params", X264_PARAMS]
-    else:
-        video = ["-map", "0:v", "-c:v", "copy"]  # spart Rechenzeit
+    f.append(f"[0:v]ass={ass_name}[vout]" if ass_name else "[0:v]null[vout]")
+    video = ["-map", "[vout]", "-c:v", "libx264", "-preset", preset, "-crf", "21",
+             "-pix_fmt", "yuv420p", "-profile:v", "high", "-threads", THREADS,
+             "-x264-params", X264_PARAMS]
     return ["ffmpeg", "-y", "-v", "error", *inputs, "-filter_complex", ";".join(f),
             "-filter_complex_threads", "1", *video, "-map", "[aout]",
             "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", "-t", f"{total:.3f}", str(out)]
@@ -136,6 +139,8 @@ def finish_command(joined: Path, total: float, times: list[float], out: Path, as
 
 def _run(cmd: list[str], cwd: Path) -> None:
     proc = subprocess.run(cmd, capture_output=True, text=True, cwd=str(cwd))
+    if proc.returncode in (-9, 137):  # vom System beendet – fast immer Speichermangel
+        raise UserError(OUT_OF_MEMORY)
     if proc.returncode != 0:
         raise RuntimeError("FFmpeg-Rendering fehlgeschlagen:\n" + (proc.stderr or "")[-2000:])
 
