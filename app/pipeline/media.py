@@ -2,7 +2,10 @@
 from __future__ import annotations
 
 import json
+import logging
+import os
 import re
+import resource
 import subprocess
 import wave
 from dataclasses import dataclass
@@ -11,6 +14,8 @@ from pathlib import Path
 import numpy as np
 
 from app.errors import UserError
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -23,8 +28,22 @@ class VideoInfo:
     rotation: int = 0
 
 
+def low_priority() -> None:
+    """Für FFmpeg-Prozesse: niedrigste CPU-Priorität, damit der Web-Server (und Renders
+    Lebenszeichen-Abfrage) auf schwachen Servern immer sofort antworten kann."""
+    try:
+        os.nice(19)
+    except OSError:
+        pass
+
+
+def peak_child_memory_mb() -> int:
+    """Höchster Speicherverbrauch eines bisher beendeten Unterprozesses (für die Logs)."""
+    return resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss // 1024
+
+
 def run(cmd: list[str], timeout: float | None = None) -> subprocess.CompletedProcess:
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, preexec_fn=low_priority)
     if proc.returncode != 0:
         tail = (proc.stderr or "")[-1500:]
         raise RuntimeError(f"Befehl fehlgeschlagen: {cmd[0]}\n{tail}")
@@ -62,6 +81,8 @@ def probe(path: Path) -> VideoInfo:
         w, h = h, w
     if duration <= 0 or w <= 0 or h <= 0:
         raise UserError("Das Video scheint leer oder beschädigt zu sein.")
+    log.info("Video: %dx%d, %.1f s, %.2f fps, %s %s, Ton: %s", w, h, duration, fps,
+             video.get("codec_name"), video.get("pix_fmt"), has_audio)
     return VideoInfo(duration=duration, width=w, height=h, fps=fps or 30.0,
                      has_audio=has_audio, rotation=rotation)
 
@@ -101,8 +122,8 @@ def detect_scenes(src: Path, threshold: float = 0.3) -> list[float]:
     proc = subprocess.run(
         # nur Schlüsselbilder dekodieren: viel schneller und sparsamer (wichtig bei 4K)
         ["ffmpeg", "-v", "info", "-threads", "1", "-skip_frame", "nokey", "-i", str(src), "-an", "-sn",
-         "-vf", f"scale=160:-2,select='gt(scene,{threshold})',showinfo", "-vsync", "vfr", "-f", "null", "-"],
-        capture_output=True, text=True)
+         "-vf", f"scale=160:-2,select='gt(scene,{threshold})',showinfo", "-fps_mode", "vfr", "-f", "null", "-"],
+        capture_output=True, text=True, preexec_fn=low_priority)
     return [float(m) for m in re.findall(r"pts_time:([0-9.]+)", proc.stderr or "")]
 
 
@@ -136,8 +157,8 @@ def sample_frames(src: Path, start: float, end: float, fps: float,
         # nur Schlüsselbilder dekodieren (Handyvideos: ca. 1 pro Sekunde) → viel schneller
         ["ffmpeg", "-v", "error", "-threads", "1", "-skip_frame", "nokey",
          "-ss", f"{start:.3f}", "-t", f"{duration:.3f}", "-i", str(src),
-         "-vf", f"scale={width}:{height},format=gray", "-vsync", "vfr", "-f", "rawvideo", "-"],
-        capture_output=True)
+         "-vf", f"scale={width}:{height},format=gray", "-fps_mode", "vfr", "-f", "rawvideo", "-"],
+        capture_output=True, preexec_fn=low_priority)
     if proc.returncode != 0 or not proc.stdout:
         return []
     frame_size = width * height

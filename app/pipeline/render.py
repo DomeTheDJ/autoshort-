@@ -1,6 +1,7 @@
 """Rendert einen Short mit FFmpeg: 1080x1920, Schnitte, Punch-in-Zooms, Untertitel, Effekte, Musik."""
 from __future__ import annotations
 
+import logging
 import os
 import shutil
 import subprocess
@@ -9,7 +10,7 @@ from pathlib import Path
 
 from app.errors import UserError
 from app.pipeline.editing import Interval
-from app.pipeline.media import VideoInfo, run
+from app.pipeline.media import VideoInfo, low_priority, peak_child_memory_mb, run
 from app.pipeline.reframe import TARGET_H, TARGET_W, Focus, crop_box
 
 ZOOM_IN = 1.12
@@ -57,6 +58,7 @@ def sfx_times(pieces: list[Piece]) -> list[float]:
     return times
 
 
+log = logging.getLogger(__name__)
 FPS = 30
 OUT_OF_MEMORY = ("Der Server hatte nicht genug Arbeitsspeicher für dieses Video. Tipp: Video in "
                  "1080p und ohne HDR aufnehmen (iPhone: Einstellungen → Kamera → Video aufnehmen) "
@@ -138,7 +140,8 @@ def finish_command(joined: Path, total: float, times: list[float], out: Path, as
 
 
 def _run(cmd: list[str], cwd: Path) -> None:
-    proc = subprocess.run(cmd, capture_output=True, text=True, cwd=str(cwd))
+    proc = subprocess.run(cmd, capture_output=True, text=True, cwd=str(cwd), preexec_fn=low_priority)
+    log.info("FFmpeg fertig (Code %s), Speicher-Spitze bisher: %d MB", proc.returncode, peak_child_memory_mb())
     if proc.returncode in (-9, 137):  # vom System beendet – fast immer Speichermangel
         raise UserError(OUT_OF_MEMORY)
     if proc.returncode != 0:
