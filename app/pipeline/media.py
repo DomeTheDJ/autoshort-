@@ -133,8 +133,10 @@ def sample_frames(src: Path, start: float, end: float, fps: float,
     height = max(2, int(round(width * src_h / src_w / 2)) * 2)
     duration = max(0.1, end - start)
     proc = subprocess.run(
-        ["ffmpeg", "-v", "error", "-threads", "1", "-ss", f"{start:.3f}", "-t", f"{duration:.3f}", "-i", str(src),
-         "-vf", f"fps={fps},scale={width}:{height},format=gray", "-f", "rawvideo", "-"],
+        # nur Schlüsselbilder dekodieren (Handyvideos: ca. 1 pro Sekunde) → viel schneller
+        ["ffmpeg", "-v", "error", "-threads", "1", "-skip_frame", "nokey",
+         "-ss", f"{start:.3f}", "-t", f"{duration:.3f}", "-i", str(src),
+         "-vf", f"scale={width}:{height},format=gray", "-vsync", "vfr", "-f", "rawvideo", "-"],
         capture_output=True)
     if proc.returncode != 0 or not proc.stdout:
         return []
@@ -142,4 +144,5 @@ def sample_frames(src: Path, start: float, end: float, fps: float,
     count = len(proc.stdout) // frame_size
     buf = np.frombuffer(proc.stdout[: count * frame_size], dtype=np.uint8)
     frames = buf.reshape(count, height, width)
-    return [(start + i / fps, frames[i]) for i in range(count)]
+    # Zeitstempel gleichmäßig über den Abschnitt verteilen (genau genug für die Bildmitte)
+    return [(start + duration * (i + 0.5) / count, frames[i]) for i in range(count)]

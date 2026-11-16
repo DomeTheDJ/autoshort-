@@ -148,7 +148,7 @@ function renderJob(job) {
     bar.appendChild(inner);
     bar.appendChild(el("span", { class: "pct" }, `${Math.round(job.progress || 0)} % – ${job.message || ""}`));
     card.appendChild(bar);
-    card.appendChild(el("p", { class: "hint" }, "Du kannst die Seite schließen – die Verarbeitung läuft auf dem Server weiter."));
+    card.appendChild(el("p", { class: "hint" }, "Bitte Seite offen und Handy entsperrt lassen – auf dem kostenlosen Server kann das eine Weile dauern."));
   } else if (job.status === "failed") {
     card.appendChild(el("p", { class: "error" }, job.error || "Unbekannter Fehler"));
   } else if (job.status === "done" && job.result) {
