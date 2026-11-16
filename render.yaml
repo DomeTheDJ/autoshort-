@@ -1,0 +1,29 @@
+# Render-Blueprint: wird beim Einrichten über "New → Blueprint" automatisch gelesen.
+# Standardmäßig KOSTENLOSER Plan. Für echte Videos wird ein bezahlter Plan empfohlen
+# (siehe README) – das bitte erst nach bewusster Entscheidung ändern.
+services:
+  - type: web
+    name: autoshorts
+    runtime: docker
+    plan: free
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: APP_PASSWORD
+        sync: false          # wird beim Einrichten abgefragt – nie ins Repository schreiben
+      - key: SECRET_KEY
+        generateValue: true  # Render erzeugt einen Zufallswert
+      - key: OPENAI_API_KEY
+        sync: false          # optional: für Untertitel/Spracherkennung
+      - key: ANTHROPIC_API_KEY
+        sync: false          # optional: für KI-Highlight-Auswahl
+      - key: MAX_UPLOAD_MB
+        value: "500"
+      - key: MAX_VIDEO_MINUTES
+        value: "30"
+      - key: DAILY_BUDGET_USD
+        value: "2"
+      - key: RETENTION_HOURS
+        value: "6"
+      - key: VIDEO_LANGUAGE
+        value: "de"

@@ -1,0 +1,7 @@
+fastapi==0.163.1
+uvicorn[standard]==0.54.0
+itsdangerous==2.2.0
+httpx==0.28.1
+numpy==2.5.3
+opencv-python-headless==4.11.0.86
+anthropic==2.9.0

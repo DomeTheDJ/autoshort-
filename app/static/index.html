@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#111318">
+  <meta name="robots" content="noindex, nofollow">
+  <title>AutoShorts</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="top">
+    <h1>AutoShorts</h1>
+    <button id="logout" class="link hidden" type="button">Abmelden</button>
+  </header>
+
+  <main>
+    <section id="login-view" class="card hidden">
+      <h2>Anmelden</h2>
+      <form id="login-form">
+        <label for="password">Passwort</label>
+        <input id="password" type="password" autocomplete="current-password" required>
+        <button type="submit" class="primary">Anmelden</button>
+        <p id="login-error" class="error" role="alert"></p>
+      </form>
+    </section>
+
+    <section id="app-view" class="hidden">
+      <div class="card">
+        <h2>Neues Video</h2>
+        <p class="hint" id="limits"></p>
+        <form id="upload-form">
+          <label class="file-pick" for="file">
+            <span id="file-label">Video auswählen (MP4 / MOV)</span>
+            <input id="file" type="file" accept="video/mp4,video/quicktime,.mp4,.mov,.m4v" required>
+          </label>
+
+          <label for="clips">Anzahl Shorts: <strong id="clips-value">5</strong></label>
+          <input id="clips" type="range" min="1" max="5" value="5">
+
+          <div class="toggles">
+            <label><input type="checkbox" id="opt-subtitles" checked> Untertitel</label>
+            <label><input type="checkbox" id="opt-pauses" checked> Pausen &amp; „äh“ entfernen</label>
+            <label><input type="checkbox" id="opt-zooms" checked> Dezente Zooms</label>
+            <label><input type="checkbox" id="opt-sfx" checked> Soundeffekte</label>
+          </div>
+
+          <label for="music">Hintergrundmusik</label>
+          <select id="music"><option value="">Keine Musik</option></select>
+
+          <button type="submit" class="primary" id="upload-btn">Hochladen &amp; Shorts erstellen</button>
+          <div id="upload-progress" class="progress hidden"><div class="bar"></div><span class="pct"></span></div>
+          <p id="upload-error" class="error" role="alert"></p>
+        </form>
+        <p id="features" class="hint"></p>
+      </div>
+
+      <h2 class="section-title">Deine Aufträge</h2>
+      <p class="hint">Dateien werden nach einigen Stunden automatisch gelöscht.</p>
+      <div id="jobs"></div>
+    </section>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>

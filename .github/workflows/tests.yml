@@ -1,0 +1,30 @@
+name: Tests
+on:
+  push:
+  pull_request:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: FFmpeg installieren
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg fonts-dejavu-core
+      - name: Python-Pakete installieren
+        run: pip install -r requirements-dev.txt
+      - name: Tests ausführen
+        run: python -m pytest -v
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Docker-Image bauen
+        run: docker build -t autoshorts .
+      - name: Container starten und Health-Check prüfen
+        run: |
+          docker run -d --name as -p 10000:10000 -e APP_PASSWORD=ci -e SECRET_KEY=ci autoshorts
+          for i in $(seq 1 30); do curl -fs http://localhost:10000/healthz && exit 0; sleep 1; done
+          docker logs as; exit 1
