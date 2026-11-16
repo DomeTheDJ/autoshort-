@@ -67,7 +67,7 @@ def probe(path: Path) -> VideoInfo:
 
 
 def extract_audio_wav(src: Path, dst: Path, sample_rate: int = 16000) -> Path:
-    run(["ffmpeg", "-y", "-v", "error", "-i", str(src), "-vn", "-ac", "1",
+    run(["ffmpeg", "-y", "-v", "error", "-vn", "-i", str(src), "-ac", "1",
          "-ar", str(sample_rate), "-c:a", "pcm_s16le", str(dst)])
     return dst
 
@@ -99,8 +99,9 @@ def audio_rms(wav: Path, window: float = 0.1) -> tuple[np.ndarray, float]:
 def detect_scenes(src: Path, threshold: float = 0.3) -> list[float]:
     """Zeitpunkte von Szenenwechseln (Sekunden). Läuft auf kleiner Auflösung, damit es schnell ist."""
     proc = subprocess.run(
-        ["ffmpeg", "-v", "info", "-i", str(src), "-an", "-sn",
-         "-vf", f"scale=160:-2,select='gt(scene,{threshold})',showinfo", "-f", "null", "-"],
+        # nur Schlüsselbilder dekodieren: viel schneller und sparsamer (wichtig bei 4K)
+        ["ffmpeg", "-v", "info", "-threads", "1", "-skip_frame", "nokey", "-i", str(src), "-an", "-sn",
+         "-vf", f"scale=160:-2,select='gt(scene,{threshold})',showinfo", "-vsync", "vfr", "-f", "null", "-"],
         capture_output=True, text=True)
     return [float(m) for m in re.findall(r"pts_time:([0-9.]+)", proc.stderr or "")]
 
@@ -132,7 +133,7 @@ def sample_frames(src: Path, start: float, end: float, fps: float,
     height = max(2, int(round(width * src_h / src_w / 2)) * 2)
     duration = max(0.1, end - start)
     proc = subprocess.run(
-        ["ffmpeg", "-v", "error", "-ss", f"{start:.3f}", "-t", f"{duration:.3f}", "-i", str(src),
+        ["ffmpeg", "-v", "error", "-threads", "1", "-ss", f"{start:.3f}", "-t", f"{duration:.3f}", "-i", str(src),
          "-vf", f"fps={fps},scale={width}:{height},format=gray", "-f", "rawvideo", "-"],
         capture_output=True)
     if proc.returncode != 0 or not proc.stdout:

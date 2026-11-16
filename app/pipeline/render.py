@@ -1,6 +1,9 @@
 """Rendert einen Short mit FFmpeg: 1080x1920, Schnitte, Punch-in-Zooms, Untertitel, Effekte, Musik."""
 from __future__ import annotations
 
+import os
+import shutil
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -53,79 +56,115 @@ def sfx_times(pieces: list[Piece]) -> list[float]:
     return times
 
 
-def build_command(src: Path, info: VideoInfo, pieces: list[Piece], out: Path,
-                  ass_name: str | None, music: Path | None, sfx: bool, preset: str = "veryfast") -> list[str]:
-    seek = max(0.0, pieces[0].start - 0.05)
-    span = pieces[-1].end - seek + 0.1
-    total = sum(p.duration for p in pieces)
-    inputs = ["-ss", f"{seek:.3f}", "-t", f"{span:.3f}", "-i", str(src)]
-    n_in = 1
+FPS = 30
+# Wenig Threads und kurzer Lookahead = wenig Arbeitsspeicher (wichtig für 512-MB-Server).
+# Auf stärkeren Servern kann FFMPEG_THREADS erhöht werden.
+THREADS = os.environ.get("FFMPEG_THREADS", "1")
+X264_PARAMS = os.environ.get("X264_PARAMS", "rc-lookahead=5")
+
+
+def piece_command(src: Path, info: VideoInfo, p: Piece, fade_in: bool, fade_out: bool,
+                  out: Path, preset: str) -> list[str]:
+    """Ein einzelnes Schnittstück rendern (Bildausschnitt, Zoom, 1080x1920).
+    Jedes Stück in einem eigenen FFmpeg-Aufruf → der Speicherbedarf bleibt klein,
+    auch bei 4K-Handyvideos."""
+    frames = max(1, round(p.duration * FPS))
+    dur = frames / FPS
+    cw, ch, x, y = crop_box(info.width, info.height, p.focus, p.zoom)
+    cmd = ["ffmpeg", "-y", "-v", "error", "-threads", THREADS,
+           "-ss", f"{p.start:.3f}", "-t", f"{dur + 0.2:.3f}", "-i", str(src)]
+    audio = "0:a:0"
     if not info.has_audio:
-        inputs += ["-f", "lavfi", "-t", f"{span:.3f}", "-i", "anullsrc=r=48000:cl=stereo"]
-        audio_src = f"{n_in}:a"
-        n_in += 1
-    else:
-        audio_src = "0:a:0"
+        cmd += ["-f", "lavfi", "-t", f"{dur + 0.2:.3f}", "-i", "anullsrc=r=48000:cl=stereo"]
+        audio = "1:a"
+    fades = ""
+    if fade_in:
+        fades += ",afade=t=in:d=0.02"
+    if fade_out:
+        fades += f",afade=t=out:st={max(0.0, dur - 0.03):.3f}:d=0.03"
+    graph = (f"[0:v]crop={cw}:{ch}:{x}:{y},scale={TARGET_W}:{TARGET_H}:flags=bicubic,setsar=1,"
+             f"fps={FPS}[v];"
+             f"[{audio}]aresample=48000,aformat=sample_fmts=s16:channel_layouts=stereo,apad,"
+             f"atrim=0:{dur:.4f}{fades}[a]")
+    return cmd + ["-filter_complex", graph, "-filter_complex_threads", "1",
+                  "-map", "[v]", "-map", "[a]", "-frames:v", str(frames),
+                  "-c:v", "libx264", "-preset", preset, "-crf", "18", "-pix_fmt", "yuv420p",
+                  "-profile:v", "high", "-threads", THREADS, "-x264-params", X264_PARAMS,
+                  "-c:a", "pcm_s16le", str(out)]
 
+
+def finish_command(joined: Path, total: float, times: list[float], out: Path, ass_name: str | None,
+                   music: Path | None, preset: str) -> list[str]:
+    """Untertitel, Soundeffekte, Musik und Lautheit auf den zusammengefügten Clip anwenden."""
+    inputs = ["-threads", THREADS, "-i", str(joined)]
+    n_in = 1
     f: list[str] = []
-    concat_in = []
-    for i, p in enumerate(pieces):
-        a, b = p.start - seek, p.end - seek
-        cw, ch, x, y = crop_box(info.width, info.height, p.focus, p.zoom)
-        f.append(f"[0:v]trim=start={a:.3f}:end={b:.3f},setpts=PTS-STARTPTS,"
-                 f"crop={cw}:{ch}:{x}:{y},scale={TARGET_W}:{TARGET_H}:flags=lanczos,setsar=1,fps=30[v{i}]")
-        fades = ""
-        if p.hard_cut:
-            fades += ",afade=t=in:d=0.02"
-        if i + 1 < len(pieces) and pieces[i + 1].hard_cut:
-            fades += f",afade=t=out:st={max(0.0, p.duration - 0.03):.3f}:d=0.03"
-        f.append(f"[{audio_src}]atrim=start={a:.3f}:end={b:.3f},asetpts=PTS-STARTPTS,"
-                 f"aresample=48000,aformat=channel_layouts=stereo{fades}[a{i}]")
-        concat_in.append(f"[v{i}][a{i}]")
-    f.append(f"{''.join(concat_in)}concat=n={len(pieces)}:v=1:a=1[vc][ac]")
-    f.append(f"[vc]ass={ass_name}[vout]" if ass_name else "[vc]null[vout]")
-
-    mix = ["[ac]"]
-    times = sfx_times(pieces) if sfx else []
+    mix = ["[0:a]"]
     if times:
         inputs += ["-f", "lavfi", "-t", "0.4", "-i", "anoisesrc=c=pink:a=0.6:d=0.4:r=48000"]
-        sfx_idx = n_in
-        n_in += 1
-        f.append(f"[{sfx_idx}:a]highpass=f=600,lowpass=f=4000,afade=t=in:d=0.15,"
+        f.append(f"[{n_in}:a]highpass=f=600,lowpass=f=4000,afade=t=in:d=0.15,"
                  f"afade=t=out:st=0.15:d=0.25,volume=0.18,aformat=channel_layouts=stereo,"
                  f"asplit={len(times)}" + "".join(f"[s{k}]" for k in range(len(times))))
         for k, t in enumerate(times):
             ms = int(t * 1000)
             f.append(f"[s{k}]adelay={ms}|{ms}[sd{k}]")
             mix.append(f"[sd{k}]")
+        n_in += 1
     if music is not None:
         inputs += ["-stream_loop", "-1", "-i", str(music)]
-        mus_idx = n_in
-        n_in += 1
-        f.append(f"[{mus_idx}:a]atrim=0:{total:.3f},aresample=48000,aformat=channel_layouts=stereo,"
+        f.append(f"[{n_in}:a]atrim=0:{total:.3f},aresample=48000,aformat=channel_layouts=stereo,"
                  f"volume=0.10,afade=t=out:st={max(0.0, total - 1.5):.3f}:d=1.5[mus]")
         mix.append("[mus]")
+        n_in += 1
     if len(mix) > 1:
         f.append(f"{''.join(mix)}amix=inputs={len(mix)}:duration=first:normalize=0[amixed]")
         last = "[amixed]"
     else:
-        last = "[ac]"
+        last = "[0:a]"
     f.append(f"{last}loudnorm=I=-14:TP=-1.5:LRA=11,aresample=48000[aout]")
-
+    if ass_name:
+        f.append(f"[0:v]ass={ass_name}[vout]")
+        video = ["-map", "[vout]", "-c:v", "libx264", "-preset", preset, "-crf", "21",
+                 "-pix_fmt", "yuv420p", "-profile:v", "high", "-threads", THREADS,
+                 "-x264-params", X264_PARAMS]
+    else:
+        video = ["-map", "0:v", "-c:v", "copy"]  # spart Rechenzeit
     return ["ffmpeg", "-y", "-v", "error", *inputs, "-filter_complex", ";".join(f),
-            "-map", "[vout]", "-map", "[aout]", "-c:v", "libx264", "-preset", preset, "-crf", "21",
-            "-pix_fmt", "yuv420p", "-profile:v", "high", "-r", "30", "-c:a", "aac", "-b:a", "160k",
-            "-movflags", "+faststart", "-t", f"{total:.3f}", str(out)]
+            "-filter_complex_threads", "1", *video, "-map", "[aout]",
+            "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", "-t", f"{total:.3f}", str(out)]
+
+
+def _run(cmd: list[str], cwd: Path) -> None:
+    proc = subprocess.run(cmd, capture_output=True, text=True, cwd=str(cwd))
+    if proc.returncode != 0:
+        raise RuntimeError("FFmpeg-Rendering fehlgeschlagen:\n" + (proc.stderr or "")[-2000:])
 
 
 def render_clip(src: Path, info: VideoInfo, pieces: list[Piece], out: Path, ass_path: Path | None,
                 music: Path | None, sfx: bool, preset: str = "veryfast") -> None:
-    cmd = build_command(src, info, pieces, out, ass_path.name if ass_path else None, music, sfx, preset)
-    # Im Job-Ordner ausführen, damit der Untertitel-Pfad nicht escaped werden muss
-    import subprocess
-    proc = subprocess.run(cmd, capture_output=True, text=True, cwd=str(out.parent))
-    if proc.returncode != 0:
-        raise RuntimeError("FFmpeg-Rendering fehlgeschlagen:\n" + (proc.stderr or "")[-2000:])
+    src, out = src.resolve(), out.resolve()
+    music = music.resolve() if music else None
+    tmp = out.parent / f".{out.stem}_parts"
+    tmp.mkdir(exist_ok=True)
+    try:
+        lines = []
+        for i, p in enumerate(pieces):
+            part = tmp / f"p{i:03d}.mkv"
+            fade_in = p.hard_cut
+            fade_out = i + 1 < len(pieces) and pieces[i + 1].hard_cut
+            _run(piece_command(src, info, p, fade_in, fade_out, part, preset), tmp)
+            lines.append(f"file '{part.name}'")
+        (tmp / "list.txt").write_text("\n".join(lines) + "\n")
+        joined = tmp / "joined.mkv"
+        _run(["ffmpeg", "-y", "-v", "error", "-f", "concat", "-safe", "0", "-i", "list.txt",
+              "-c", "copy", str(joined)], tmp)
+        total = sum(max(1, round(p.duration * FPS)) / FPS for p in pieces)
+        times = sfx_times(pieces) if sfx else []
+        # Im Job-Ordner ausführen, damit der Untertitel-Pfad nicht escaped werden muss
+        _run(finish_command(joined, total, times, out, ass_path.name if ass_path else None, music, preset),
+             out.parent)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 def make_thumbnail(clip: Path, out: Path) -> None:

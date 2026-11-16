@@ -125,6 +125,7 @@ Render startet die App dann neu.
 | `CLIP_MIN_SECONDS` / `CLIP_MAX_SECONDS` | `15` / `60` | Länge der Shorts |
 | `RETENTION_HOURS` | `6` | Danach werden alle Dateien automatisch gelöscht |
 | `X264_PRESET` | `veryfast` | `ultrafast` = schneller, aber größere Dateien |
+| `FFMPEG_THREADS` | `1` | Mehr Threads = schneller, aber mehr Arbeitsspeicher (nur auf größeren Servern erhöhen) |
 
 ## Hintergrundmusik
 Lege lizenzierte Musikdateien in den Ordner [`music/`](music/LIESMICH.md) (geht auch über die
@@ -151,9 +152,16 @@ erscheinen sie in der App zur Auswahl. Ohne Dateien gibt es nur „Keine Musik�
 * **Die Highlight-Heuristik** arbeitet mit Wortlisten (vor allem Deutsch/Englisch). Mit Claude
   ist die Auswahl inhaltlich besser.
 * **Upload über Mobilfunk**: große Videos brauchen lange; WLAN empfohlen.
+* **4K-Videos auf dem kostenlosen Plan**: Der Speicherbedarf wurde auf ca. 360 MB begrenzt
+  (gemessen mit einem 4K-HEVC-Testvideo), die Rechenzeit ist aber hoch (ca. 200 CPU-Sekunden für
+  90 s 4K → auf dem kostenlosen Server evtl. 20–40 Minuten). Tipp: Am iPhone unter
+  *Einstellungen → Kamera → Video aufnehmen* „1080p HD“ wählen – das ist viel schneller.
+* **Bildschirm an lassen**: Auf dem kostenlosen Plan schläft der Server ein, wenn ihn ca.
+  15 Minuten niemand aufruft. Die offene Seite fragt alle paar Sekunden nach dem Stand und hält
+  ihn wach – aber nur, solange das Handy entsperrt und der Browser im Vordergrund ist.
 
 ## Was ist getestet?
-Automatisiert getestet (40 Tests, `python -m pytest`), lokal in einer Linux-Umgebung:
+Automatisiert getestet (41 Tests, `python -m pytest`), lokal in einer Linux-Umgebung:
 * Schnittlogik (Pausen, Füllwörter, Wiederholungen, Zeit-Umrechnung), Untertitel-Erzeugung,
   Highlight-Auswahl (15–60 s, 3–5 Clips, keine Überschneidungen), Bildausschnitt-Geometrie.
 * **Echter Durchlauf mit FFmpeg** an künstlich erzeugten Testvideos (Testbild + Ton):
