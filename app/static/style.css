@@ -48,3 +48,4 @@ button { font-size: 16px; cursor: pointer; }
 .actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
 .actions > * { flex: 1; }
 .notes { font-size: .85rem; color: var(--muted); padding-left: 18px; }
+.diag { font-size: .75rem; word-break: break-word; }

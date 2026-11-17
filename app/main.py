@@ -18,6 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from itsdangerous import BadSignature, SignatureExpired, TimestampSigner
 from starlette.concurrency import run_in_threadpool
 
+from app import diagnostics
 from app.config import Settings, load_settings
 from app.costs import CostTracker
 from app.errors import UserError
@@ -193,8 +194,14 @@ def create_app(settings: Settings | None = None, processor=None, start_worker: b
         return {"id": job_id}
 
     def public(job: dict) -> dict:
-        keep = ("id", "status", "progress", "message", "filename", "created", "error", "result", "options")
+        keep = ("id", "status", "progress", "message", "filename", "created", "error", "result", "options",
+                "diag")
         return {k: job.get(k) for k in keep}
+
+    @app.get("/api/diag", dependencies=[Depends(require_auth)])
+    def diag():
+        snap = diagnostics.snapshot(settings.data_dir)
+        return {**snap, "summary": diagnostics.summary(snap)}
 
     @app.get("/api/jobs", dependencies=[Depends(require_auth)])
     def jobs():

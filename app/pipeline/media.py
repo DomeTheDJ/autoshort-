@@ -26,6 +26,8 @@ class VideoInfo:
     fps: float
     has_audio: bool
     rotation: int = 0
+    codec: str = ""
+    pix_fmt: str = ""
 
 
 def low_priority() -> None:
@@ -84,7 +86,8 @@ def probe(path: Path) -> VideoInfo:
     log.info("Video: %dx%d, %.1f s, %.2f fps, %s %s, Ton: %s", w, h, duration, fps,
              video.get("codec_name"), video.get("pix_fmt"), has_audio)
     return VideoInfo(duration=duration, width=w, height=h, fps=fps or 30.0,
-                     has_audio=has_audio, rotation=rotation)
+                     has_audio=has_audio, rotation=rotation,
+                     codec=str(video.get("codec_name", "")), pix_fmt=str(video.get("pix_fmt", "")))
 
 
 def extract_audio_wav(src: Path, dst: Path, sample_rate: int = 16000) -> Path:

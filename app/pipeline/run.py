@@ -44,6 +44,10 @@ def process(job_dir: Path, source: Path, options: dict, settings: Settings,
 
     progress(2, "Video wird geprüft")
     info = media.probe(source)
+    size_mb = source.stat().st_size // (1024 * 1024)
+    (job_dir / "video.txt").write_text(
+        f"Video {info.width}x{info.height}, {info.fps:.0f} fps, {info.duration:.0f} s, {size_mb} MB, "
+        f"{info.codec} {info.pix_fmt}")
     if info.duration > settings.max_video_minutes * 60:
         raise UserError(f"Das Video ist {info.duration / 60:.1f} Minuten lang. Erlaubt sind höchstens "
                         f"{settings.max_video_minutes:.0f} Minuten (MAX_VIDEO_MINUTES).")

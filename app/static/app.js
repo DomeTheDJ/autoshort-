@@ -148,9 +148,11 @@ function renderJob(job) {
     bar.appendChild(inner);
     bar.appendChild(el("span", { class: "pct" }, `${Math.round(job.progress || 0)} % – ${job.message || ""}`));
     card.appendChild(bar);
+    if (job.diag) card.appendChild(el("p", { class: "hint diag" }, "Technische Infos: " + job.diag));
     card.appendChild(el("p", { class: "hint" }, "Bitte Seite offen und Handy entsperrt lassen – auf dem kostenlosen Server kann das eine Weile dauern."));
   } else if (job.status === "failed") {
     card.appendChild(el("p", { class: "error" }, job.error || "Unbekannter Fehler"));
+    if (job.diag) card.appendChild(el("p", { class: "hint diag" }, "Technische Infos: " + job.diag));
   } else if (job.status === "done" && job.result) {
     if (job.result.notes && job.result.notes.length) {
       const ul = el("ul", { class: "notes" });
@@ -188,7 +190,7 @@ async function loadJobs() {
   clearTimeout(pollTimer);
   try {
     const jobs = await api("/api/jobs");
-    const sig = JSON.stringify(jobs.map((j) => [j.id, j.status, j.progress, j.message]));
+    const sig = JSON.stringify(jobs.map((j) => [j.id, j.status, j.progress, j.message, j.diag]));
     if (sig !== lastSignature) {   // nur neu zeichnen, wenn sich etwas geändert hat (Videos laufen weiter)
       lastSignature = sig;
       const box = $("jobs");

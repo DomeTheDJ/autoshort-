@@ -11,6 +11,7 @@ import uuid
 from pathlib import Path
 from typing import Callable
 
+from app import diagnostics
 from app.config import Settings
 from app.costs import CostTracker
 from app.errors import UserError
@@ -79,8 +80,10 @@ class JobStore:
         """Nach einem Neustart: angefangene Jobs als fehlgeschlagen markieren."""
         for j in self.list():
             if j["status"] in ("queued", "running"):
+                where = f" Abbruch bei {j.get('progress', 0)} % ({j.get('message', '')})." \
+                    if j["status"] == "running" else ""
                 self.update(j["id"], status="failed",
-                            error="Der Server wurde neu gestartet. Bitte das Video erneut hochladen.")
+                            error="Der Server wurde neu gestartet. Bitte das Video erneut hochladen." + where)
 
     def cleanup(self, max_age_hours: float) -> int:
         cutoff = time.time() - max_age_hours * 3600
@@ -135,6 +138,23 @@ class Worker:
         d = self.store.dir(job_id)
         source = next(iter(d.glob("original.*")), None)
         self.store.update(job_id, status="running", progress=1, message="Verarbeitung startet")
+        stop_sampling = threading.Event()
+
+        def sample() -> None:
+            """Alle 2 s Speicher messen und speichern – überlebt einen Absturz auf der Platte."""
+            peak = 0
+            while not stop_sampling.is_set():
+                try:
+                    snap = diagnostics.snapshot(self.settings.data_dir)
+                    peak = max(peak, snap.get("memory", {}).get("used_mb") or 0)
+                    video = (d / "video.txt").read_text() if (d / "video.txt").exists() else ""
+                    text = diagnostics.summary(snap) + f"; höchster Messwert {peak} MB"
+                    self.store.update(job_id, diag=(video + "; " if video else "") + text)
+                except Exception:
+                    log.debug("Diagnose fehlgeschlagen", exc_info=True)
+                stop_sampling.wait(2.0)
+
+        threading.Thread(target=sample, name="autoshorts-diag", daemon=True).start()
 
         def progress(pct: float, msg: str) -> None:
             self.store.update(job_id, progress=round(min(99.0, pct), 1), message=msg)
@@ -152,6 +172,7 @@ class Worker:
                               error="Bei der Verarbeitung ist ein technischer Fehler aufgetreten. "
                                     "Bitte ein anderes Video versuchen oder die Server-Logs in Render ansehen.")
         finally:
+            stop_sampling.set()
             if source is not None and source.exists():
                 # Kopie des Originals nach der Verarbeitung entfernen (spart Speicher)
                 source.chmod(0o600)

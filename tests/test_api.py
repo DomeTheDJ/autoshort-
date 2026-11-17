@@ -164,3 +164,18 @@ def test_security_headers(client):
     r = client.get("/")
     assert r.headers["x-frame-options"] == "DENY"
     assert "default-src 'self'" in r.headers["content-security-policy"]
+
+
+def test_diag_endpoint_and_interrupted_message(settings):
+    app = create_app(settings, start_worker=False)
+    store = app.state.store
+    jid = store.new_id()
+    store.create(jid, "x.mp4", {})
+    store.update(jid, status="running", progress=53.3, message="Short 1 von 3: Rendern", diag="Speicher 400/512 MB")
+    with TestClient(app) as c:
+        login(c)
+        d = c.get("/api/diag").json()
+        assert "disk" in d and "summary" in d
+        job = c.get(f"/api/jobs/{jid}").json()
+        assert "53.3 %" in job["error"] and "Rendern" in job["error"]
+        assert job["diag"] == "Speicher 400/512 MB"
